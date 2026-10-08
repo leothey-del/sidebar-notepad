@@ -1,0 +1,38 @@
+{
+  "name": "vscodesidebar-notes",
+  "displayName": "Sidebar Quick Notes",
+  "description": "The Best Note",
+  "version": "0.0.1",
+  "publisher": "local-dev",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": []
+    },
+    "views": {
+      "explorer": [
+        {
+          "type": "webview",
+          "id": "notesView",
+          "name": "The Best Note"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^16.x",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^4.9.5"
+  }
+}
