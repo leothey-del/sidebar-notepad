@@ -1,5 +1,9 @@
 # Sidebar Notepad
 
+[![GitHub stars](https://img.shields.io/github/stars/leothey-del/sidebar-notepad?style=social)](https://github.com/leothey-del/sidebar-notepad)
+
+If you find this extension helpful, please consider giving the project a ⭐ on GitHub!
+
 Keep notes close to your code in a dedicated VS Code Explorer view. Create and organize notes, capture code selections, track checklist progress, and find or restore notes without leaving your editor.
 
 ## Screenshots
