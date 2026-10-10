@@ -4,9 +4,9 @@ Keep quick notes close to your work. Sidebar Quick Notes is a lightweight, multi
 
 ## Screenshots
 
-![Sidebar Quick Notes screenshot 1](https://raw.githubusercontent.com/leothey-del/sidebar-notepad/main/images/image1.PNG)
+![Sidebar Quick Notes screenshot 1](https://raw.githubusercontent.com/leothey-del/sidebar-notepad/main/images/image1.png)
 
-![Sidebar Quick Notes screenshot 2](https://raw.githubusercontent.com/leothey-del/sidebar-notepad/main/images/image2.PNG)
+![Sidebar Quick Notes screenshot 2](https://raw.githubusercontent.com/leothey-del/sidebar-notepad/main/images/image2.png)
 
 ## Features
 
