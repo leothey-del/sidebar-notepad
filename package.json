@@ -2,7 +2,7 @@
   "name": "vscodesidebar-notes",
   "displayName": "Sidebar Notepad",
   "description": "Keep your thoughts organized with persistent notes that sync across projects",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "publisher": "leoOrtega",
   "icon": "icon.png",
   "license": "MIT",
@@ -18,16 +18,22 @@
     "vscode": "^1.75.0"
   },
   "categories": [
+    "Notebooks",
     "Other"
+  ],
+  "keywords": [
+    "notes",
+    "notepad",
+    "sidebar",
+    "todo",
+    "markdown",
+    "scratchpad"
   ],
   "activationEvents": [
     "onView:notesView"
   ],
   "main": "./out/extension.js",
   "contributes": {
-    "viewsContainers": {
-      "activitybar": []
-    },
     "views": {
       "explorer": [
         {
@@ -36,6 +42,144 @@
           "name": "Notes"
         }
       ]
+    },
+    "commands": [
+      {
+        "command": "quickNotes.newNote",
+        "title": "New Note",
+        "category": "Quick Notes"
+      },
+      {
+        "command": "quickNotes.nextNote",
+        "title": "Next Note",
+        "category": "Quick Notes"
+      },
+      {
+        "command": "quickNotes.prevNote",
+        "title": "Previous Note",
+        "category": "Quick Notes"
+      },
+      {
+        "command": "quickNotes.searchNotes",
+        "title": "Search Notes",
+        "category": "Quick Notes"
+      },
+      {
+        "command": "quickNotes.addSelection",
+        "title": "Add Selection to Note",
+        "category": "Quick Notes"
+      },
+      {
+        "command": "quickNotes.newNoteFromSelection",
+        "title": "New Note from Selection",
+        "category": "Quick Notes"
+      },
+      {
+        "command": "quickNotes.exportNotes",
+        "title": "Export Notes",
+        "category": "Quick Notes"
+      },
+      {
+        "command": "quickNotes.importNotes",
+        "title": "Import Notes",
+        "category": "Quick Notes"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "quickNotes.addSelection",
+          "when": "editorHasSelection",
+          "group": "9_cutcopypaste@99"
+        },
+        {
+          "command": "quickNotes.newNoteFromSelection",
+          "when": "editorHasSelection",
+          "group": "9_cutcopypaste@100"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "quickNotes.addSelection",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "quickNotes.newNoteFromSelection",
+          "when": "editorHasSelection"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "quickNotes.newNote",
+        "key": "alt+shift+n",
+        "mac": "alt+shift+n"
+      },
+      {
+        "command": "quickNotes.searchNotes",
+        "key": "alt+shift+s",
+        "mac": "alt+shift+s"
+      },
+      {
+        "command": "quickNotes.nextNote",
+        "key": "ctrl+alt+.",
+        "mac": "cmd+alt+."
+      },
+      {
+        "command": "quickNotes.prevNote",
+        "key": "ctrl+alt+,",
+        "mac": "cmd+alt+,"
+      },
+      {
+        "command": "quickNotes.addSelection",
+        "key": "ctrl+alt+a",
+        "mac": "cmd+alt+a",
+        "when": "editorTextFocus && editorHasSelection"
+      }
+    ],
+    "configuration": {
+      "title": "Sidebar Quick Notes",
+      "properties": {
+        "sidebarQuickNotes.autoSaveDelay": {
+          "type": "number",
+          "default": 400,
+          "minimum": 100,
+          "maximum": 5000,
+          "description": "How long to wait after you stop typing before saving, in milliseconds."
+        },
+        "sidebarQuickNotes.fontSize": {
+          "type": "number",
+          "default": 13,
+          "minimum": 10,
+          "maximum": 24,
+          "description": "Font size of the note text."
+        },
+        "sidebarQuickNotes.newNoteTitle": {
+          "type": "string",
+          "enum": [
+            "untitled",
+            "date"
+          ],
+          "enumDescriptions": [
+            "New notes start as Untitled.",
+            "New notes start with today's date as the title."
+          ],
+          "default": "untitled",
+          "description": "Title given to a new note."
+        },
+        "sidebarQuickNotes.trashRetentionDays": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "maximum": 365,
+          "description": "How many days deleted notes stay in Trash before they are removed for good."
+        },
+        "sidebarQuickNotes.syncWithSettingsSync": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include your global notes in VS Code Settings Sync so they follow you between computers. Requires Settings Sync to be turned on, and a newer edit on one computer can replace the other."
+        }
+      }
     }
   },
   "scripts": {

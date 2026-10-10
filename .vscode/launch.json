@@ -1,0 +1,25 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run Extension",
+            "type": "extensionHost",
+            "request": "launch",
+            "args": [
+                "--extensionDevelopmentPath=${workspaceFolder}"
+            ],
+            "preLaunchTask": "npm: watch",
+            "outFiles": [
+                "${workspaceFolder}/out/**/*.js"
+            ],
+            "autoReload": {
+                "enable": true,
+                "watch": [
+                    "${workspaceFolder}/out/**/*.js"
+                ],
+                "restart": true,
+                "delay": 1000
+            }
+        }
+    ]
+}
