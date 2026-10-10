@@ -1,14 +1,27 @@
 {
   "name": "vscodesidebar-notes",
-  "displayName": "Sidebar Quick Notes",
-  "description": "The Best Note",
-  "version": "0.0.1",
-  "publisher": "local-dev",
+  "displayName": "Sidebar Notepad",
+  "description": "Keep your thoughts organized with persistent notes that sync across projects",
+  "version": "0.0.2",
+  "publisher": "leoOrtega",
+  "icon": "icon.png",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/leothey-del/sidebar-notepad.git"
+  },
+  "bugs": {
+    "url": "https://github.com/leothey-del/sidebar-notepad/issues"
+  },
+  "homepage": "https://github.com/leothey-del/sidebar-notepad#readme",
   "engines": {
     "vscode": "^1.75.0"
   },
   "categories": [
     "Other"
+  ],
+  "activationEvents": [
+    "onView:notesView"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -20,7 +33,7 @@
         {
           "type": "webview",
           "id": "notesView",
-          "name": "The Best Note"
+          "name": "Notes"
         }
       ]
     }
