@@ -7,18 +7,25 @@
     }
 
     function inline(raw) {
-        var codes = [];
+        var stash = [];
+        function keep(html) {
+            stash.push(html);
+            return '\u0000' + (stash.length - 1) + '\u0000';
+        }
         var out = esc(raw);
         out = out.replace(/`([^`]+)`/g, function (m, c) {
-            codes.push(c);
-            return '\u0000' + (codes.length - 1) + '\u0000';
+            return keep('<code>' + c + '</code>');
+        });
+        // Images: https links and base64 data images only. Text is already escaped above.
+        out = out.replace(/!\[([^\]]*)\]\((https:\/\/[^\s)]+|data:image\/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+\/=]+)\)/g, function (m, alt, src) {
+            return keep('<img src="' + src + '" alt="' + alt + '" loading="lazy">');
         });
         out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
         out = out.replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>');
         out = out.replace(/~~([^~]+)~~/g, '<del>$1</del>');
         out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>');
         out = out.replace(/\u0000(\d+)\u0000/g, function (m, i) {
-            return '<code>' + codes[Number(i)] + '</code>';
+            return stash[Number(i)];
         });
         return out;
     }

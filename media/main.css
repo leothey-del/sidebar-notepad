@@ -479,6 +479,13 @@ textarea:focus-visible { outline: none; border-color: var(--vscode-focusBorder);
 }
 .preview hr { border: none; border-top: 1px solid var(--vscode-panel-border); margin: 0.9em 0; }
 .preview a { color: var(--vscode-textLink-foreground); }
+.preview img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 8px 0;
+    border-radius: 4px;
+}
 .preview .empty { color: var(--vscode-descriptionForeground); }
 
 /* ---------- Footer ---------- */
