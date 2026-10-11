@@ -1,14 +1,6 @@
 # Sidebar Notepad
 
-[![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/leoort)
-
----
-### ☕ Support My Work
-If this extension has saved you time or made your workflow easier, consider [buying me a coffee](https://ko-fi.com/leoort)!
-
-[![GitHub stars](https://img.shields.io/github/stars/leothey-del/sidebar-notepad?style=social)](https://github.com/leothey-del/sidebar-notepad)
-
-If you find this extension helpful, please consider giving the project a ⭐ on GitHub!
+☕ [Buy me a coffee](https://ko-fi.com/leoort)
 
 Keep notes close to your code in a dedicated VS Code Explorer view. Create and organize notes, capture code selections, paste images, track checklist progress, and find or restore notes without leaving your editor.
 
