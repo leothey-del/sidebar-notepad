@@ -2,6 +2,9 @@
     'use strict';
 
     // BEGIN PURE
+    var imageBase = '';
+    function setImageBase(v) { imageBase = v || ''; }
+
     function esc(s) {
         return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
@@ -19,6 +22,11 @@
         // Images: https links and base64 data images only. Text is already escaped above.
         out = out.replace(/!\[([^\]]*)\]\((https:\/\/[^\s)]+|data:image\/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+\/=]+)\)/g, function (m, alt, src) {
             return keep('<img src="' + src + '" alt="' + alt + '" loading="lazy">');
+        });
+        // Images saved by the extension: ![name](img:file.png)
+        out = out.replace(/!\[([^\]]*)\]\(img:([A-Za-z0-9._-]+)\)/g, function (m, alt, file) {
+            if (!imageBase) { return m; }
+            return keep('<img src="' + esc(imageBase) + '/' + file + '" alt="' + alt + '" loading="lazy">');
         });
         out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
         out = out.replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>');
@@ -342,14 +350,25 @@
         if (previewMode) { renderPreview(); }
     }
 
-    function setPreview(on) {
+    // Updates what is on screen only
+    function applyPreview(on) {
         previewMode = on;
         el.noteInput.hidden = on;
         el.preview.hidden = !on;
         el.previewBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
-        el.previewBtn.title = on ? 'Back to editing' : 'Preview markdown';
+        el.previewBtn.title = on ? 'Previewing. Click to edit' : 'Preview markdown';
         if (on) { renderPreview(); }
         saveViewState();
+    }
+
+    // Changes the mode and remembers it for the current note
+    function setPreview(on) {
+        var n = currentNote();
+        if (n && !!n.preview !== on) {
+            if (on) { n.preview = true; } else { delete n.preview; }
+            markDirty();
+        }
+        applyPreview(on);
     }
 
     function applySettings(next) {
@@ -361,6 +380,8 @@
     function showNote(id) {
         persistIfPending();
         currentId = id;
+        var shown = currentNote();
+        applyPreview(!!(shown && shown.preview));
         loadNoteIntoInputs();
         renderChrome();
         saveViewState();
@@ -469,6 +490,7 @@
         lastDeleted = { note: n, index: i };
         // Land on the note before the deleted one so the removal is obvious
         currentId = pages[Math.max(0, Math.min(i - 1, pages.length - 1))].id;
+        applyPreview(!!currentNote().preview);
         loadNoteIntoInputs();
         renderChrome();
         saveViewState();
@@ -513,6 +535,50 @@
         var pos = ta.selectionStart;
         var atLineStart = pos === 0 || ta.value.charAt(pos - 1) === '\n';
         document.execCommand('insertText', false, (atLineStart ? '' : '\n') + '- [ ] ');
+    }
+
+    function insertImageMarkdown(file) {
+        var n = currentNote();
+        if (!n) { return; }
+        var line = '![image](img:' + file + ')';
+
+        if (previewMode) {
+            // No text cursor while previewing, so add the picture at the end of the note
+            var existing = n.content.replace(/\s+$/, '');
+            n.content = (existing ? existing + '\n\n' : '') + line + '\n';
+            n.updated = Date.now();
+            el.noteInput.value = n.content;
+            markDirty();
+            renderOptions();
+            renderFooter();
+            renderPreview();
+        } else {
+            var ta = el.noteInput;
+            ta.focus();
+            var pos = ta.selectionStart;
+            var atLineStart = pos === 0 || ta.value.charAt(pos - 1) === '\n';
+            document.execCommand('insertText', false, (atLineStart ? '' : '\n') + line + '\n');
+            onEdit();
+            setPreview(true);
+        }
+
+        // Bring the new picture into view
+        var img = el.preview.querySelector('img[src$="' + file + '"]');
+        if (img && img.scrollIntoView) { img.scrollIntoView({ block: 'nearest' }); }
+        flash('Image added');
+    }
+
+    function sendImageFile(file) {
+        if (!file || String(file.type).indexOf('image/') !== 0) { return false; }
+        if (file.size > 8 * 1024 * 1024) { flash('Image is larger than 8 MB'); return true; }
+        flash('Adding image');
+        var reader = new FileReader();
+        reader.onload = function () {
+            var data = String(reader.result);
+            vscode.postMessage({ type: 'saveImage', data: data.slice(data.indexOf(',') + 1) });
+        };
+        reader.readAsDataURL(file);
+        return true;
     }
 
     function insertSelection(msg) {
@@ -671,6 +737,10 @@
             flash('Copied note');
         });
         addMenuItem('Add checklist item', insertChecklistItem);
+        addMenuItem('Insert image from file', function () {
+            persistIfPending();
+            vscode.postMessage({ type: 'pickImage' });
+        });
         addMenuItem('Attach current file', function () {
             vscode.postMessage({ type: 'attachLink' });
         }, { hint: 'from editor' });
@@ -909,6 +979,19 @@
         }
     });
 
+    // Paste a screenshot or copied image straight into the note (edit or preview mode)
+    document.addEventListener('paste', function (e) {
+        if (e.target === el.titleInput || e.target === el.panelInput) { return; }
+        var items = (e.clipboardData && e.clipboardData.items) || [];
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].kind === 'file' && String(items[i].type).indexOf('image/') === 0) {
+                e.preventDefault();
+                sendImageFile(items[i].getAsFile());
+                return;
+            }
+        }
+    });
+
     el.noteSelect.addEventListener('change', function (e) {
         var p = pages[parseInt(e.target.value, 10)];
         if (p) { showNote(p.id); }
@@ -1009,6 +1092,8 @@
     }
 
     function applyLoad(msg, restoreState) {
+        window.__notesReady = true;
+        setImageBase(msg.imagesBase);
         pages = Array.isArray(msg.pages) ? msg.pages : [];
         trash = Array.isArray(msg.trash) ? msg.trash : [];
         scope = msg.scope === 'workspace' ? 'workspace' : 'global';
@@ -1018,10 +1103,9 @@
         if (restoreState) {
             var saved = vscode.getState() || {};
             if (saved.currentId) { currentId = saved.currentId; }
-            previewMode = !!saved.previewMode;
         }
         ensureCurrent();
-        setPreview(previewMode);
+        applyPreview(!!currentNote().preview);
         loadNoteIntoInputs();
         renderChrome();
         closePanel();
@@ -1041,6 +1125,7 @@
                 var n = currentNote();
                 if (n && msg.link) { n.link = msg.link; commitMeta(); flash('Linked to ' + msg.link.label); }
                 break;
+            case 'imageSaved': insertImageMarkdown(String(msg.file)); break;
             case 'toast': flash(String(msg.text || '')); break;
         }
     });

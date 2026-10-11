@@ -13,6 +13,7 @@ interface NotePage {
     title: string;
     content: string;
     pinned?: boolean;
+    preview?: boolean;
     color?: string;
     updated?: number;
     link?: NoteLink;
@@ -28,6 +29,7 @@ const SCOPE_KEY = 'quickNotesScope';
 const CONFIG = 'sidebarQuickNotes';
 const COLORS = ['red', 'orange', 'yellow', 'green', 'blue', 'purple'];
 const MAX_TRASH = 100;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 function makeId(): string {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -67,6 +69,9 @@ function normalizeNotes(raw: unknown, isTrash = false): NotePage[] {
         if (r.pinned === true) {
             note.pinned = true;
         }
+        if (r.preview === true) {
+            note.preview = true;
+        }
         if (typeof r.color === 'string' && COLORS.indexOf(r.color) >= 0) {
             note.color = r.color;
         }
@@ -83,6 +88,27 @@ function normalizeNotes(raw: unknown, isTrash = false): NotePage[] {
         result.push(note);
     }
     return result;
+}
+
+/** Looks at the first bytes of a file to decide if it is a supported image. */
+function detectImageExt(b: Uint8Array): string | undefined {
+    if (b.length < 12) {
+        return undefined;
+    }
+    if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) {
+        return 'png';
+    }
+    if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) {
+        return 'jpg';
+    }
+    if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) {
+        return 'gif';
+    }
+    if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+        b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) {
+        return 'webp';
+    }
+    return undefined;
 }
 
 function getNonce(): string {
@@ -195,7 +221,7 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.options = {
             enableScripts: true,
-            localResourceRoots: [vscode.Uri.joinPath(this._context.extensionUri, 'media')]
+            localResourceRoots: [vscode.Uri.joinPath(this._context.extensionUri, 'media'), this._imagesDir()]
         };
         webviewView.webview.html = this._getHtml(webviewView.webview);
 
@@ -226,8 +252,31 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
             trash: this._trash,
             scope: this._scope,
             hasWorkspace: this._hasWorkspace(),
-            settings: this._settings()
+            settings: this._settings(),
+            imagesBase: this._view.webview.asWebviewUri(this._imagesDir()).toString()
         });
+    }
+
+    private _imagesDir(): vscode.Uri {
+        return vscode.Uri.joinPath(this._context.globalStorageUri, 'images');
+    }
+
+    /** Saves an image next to the extension's data so notes only keep a short link to it. */
+    private async _storeImage(bytes: Uint8Array): Promise<void> {
+        const ext = detectImageExt(bytes);
+        if (!ext) {
+            void vscode.window.showErrorMessage('That file is not a PNG, JPEG, GIF or WebP image.');
+            return;
+        }
+        if (bytes.length > MAX_IMAGE_BYTES) {
+            void vscode.window.showErrorMessage('Images must be smaller than 8 MB.');
+            return;
+        }
+        const dir = this._imagesDir();
+        await vscode.workspace.fs.createDirectory(dir);
+        const file = 'img-' + makeId() + '.' + ext;
+        await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(dir, file), bytes);
+        this._post({ type: 'imageSaved', file });
     }
 
     private _reveal() {
@@ -272,6 +321,26 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
             case 'openSettings':
                 void vscode.commands.executeCommand('workbench.action.openSettings', CONFIG);
                 break;
+            case 'saveImage':
+                if (typeof msg.data === 'string' && msg.data.length < MAX_IMAGE_BYTES * 1.4) {
+                    await this._storeImage(Buffer.from(msg.data, 'base64'));
+                }
+                break;
+            case 'pickImage': {
+                const picked = await vscode.window.showOpenDialog({
+                    canSelectMany: false,
+                    filters: { Images: ['png', 'jpg', 'jpeg', 'gif', 'webp'] },
+                    openLabel: 'Insert image'
+                });
+                if (picked && picked.length > 0) {
+                    try {
+                        await this._storeImage(await vscode.workspace.fs.readFile(picked[0]));
+                    } catch {
+                        void vscode.window.showErrorMessage('Could not read that image.');
+                    }
+                }
+                break;
+            }
             case 'attachLink':
                 this._attachLink();
                 break;
@@ -438,10 +507,10 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
             if (ok !== 'Replace') {
                 return;
             }
-            const moved: NotePage[] = this._pages
+            const moved = this._pages
                 .filter(n => n.content.trim() || n.title !== 'Untitled')
                 .map(n => ({ ...n, deletedAt: Date.now() }));
-            this._trash = moved.concat(this._trash).slice(0, MAX_TRASH);
+            this._trash = [...moved, ...this._trash].slice(0, MAX_TRASH);
             this._pages = imported;
         } else {
             const ids = new Set(this._pages.map(p => p.id));
@@ -471,12 +540,35 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}'; img-src https: data:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}'; img-src https: data: ${webview.cspSource};">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="${styleUri}" rel="stylesheet">
     <title>Notes</title>
 </head>
 <body>
+    <div id="bootError" class="boot-error" role="alert" hidden></div>
+    <script nonce="${nonce}">
+        (function () {
+            var box = document.getElementById('bootError');
+            function show(text) {
+                if (!box) { return; }
+                var line = document.createElement('div');
+                line.textContent = text;
+                box.appendChild(line);
+                box.hidden = false;
+            }
+            window.addEventListener('error', function (e) {
+                var t = e.target;
+                if (t && t.tagName === 'SCRIPT') { show('Could not load ' + String(t.src).split('/').pop()); return; }
+                show('Error: ' + e.message + ' (line ' + e.lineno + ')');
+            }, true);
+            setTimeout(function () {
+                if (!window.__notesReady) {
+                    show('Notes did not start. Make sure media/main.js is the latest version, then restart debugging.');
+                }
+            }, 3000);
+        })();
+    </script>
     <div class="toolbar">
         <div class="select-wrap">
             <select id="noteSelect" aria-label="Choose a note"></select>
