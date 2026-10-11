@@ -526,6 +526,12 @@ textarea:focus-visible {
     word-wrap: break-word;
 }
 
+.icon-btn.warning-click {
+    outline: 2px solid var(--vscode-inputValidation-warningBorder, var(--vscode-editorWarning-foreground, #cca700));
+    outline-offset: -2px;
+    transition: outline-color 0.15s ease;
+}
+
 .preview> :first-child {
     margin-top: 0;
 }

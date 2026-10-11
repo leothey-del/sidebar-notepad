@@ -147,6 +147,7 @@
     var pendingSave = false;
     var saveTimeout = null;
     var flashTimeout = null;
+    var previewClickTimeout = null;
     var flashActive = false;
     var lastDeleted = null;
     var panelMode = null;
@@ -1005,6 +1006,15 @@
     el.previewBtn.addEventListener('click', function () {
         setPreview(!previewMode);
         if (!previewMode) { el.noteInput.focus(); }
+    });
+
+    el.preview.addEventListener('click', function (e) {
+        if (e.target.closest('input, a, button')) { return; }
+        clearTimeout(previewClickTimeout);
+        el.previewBtn.classList.add('warning-click');
+        previewClickTimeout = setTimeout(function () {
+            el.previewBtn.classList.remove('warning-click');
+        }, 1200);
     });
 
     el.preview.addEventListener('change', function (e) {
