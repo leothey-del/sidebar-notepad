@@ -6,15 +6,8 @@ Keep notes close to your code in a dedicated VS Code Explorer view. Create and o
 
 ## Screenshots
 
-![Sidebar Quick Notes screenshot 1](https://raw.githubusercontent.com/leothey-del/sidebar-notepad/main/images/image3.png)
+![Sidebar Quick Notes screenshot 1](https://raw.githubusercontent.com/leothey-del/sidebar-notepad/main/images/image8.png)
 
-![Sidebar Quick Notes screenshot 2](https://raw.githubusercontent.com/leothey-del/sidebar-notepad/main/images/image4.png)
-
-Supports Ctrl+C and Ctrl+V — easily copy and paste text in your notes.
-![Sidebar Quick Notes screenshot 2](https://raw.githubusercontent.com/leothey-del/sidebar-notepad/main/images/image6.png)
-
-Insert image from file
-![Sidebar Quick Notes screenshot 2](https://raw.githubusercontent.com/leothey-del/sidebar-notepad/main/images/image7.png)
 
 ## Features
 
@@ -30,6 +23,14 @@ Insert image from file
 - **Global or project notes:** Choose extension-wide notes or notes stored with the current workspace.
 - **Optional Settings Sync:** Include global notes in VS Code Settings Sync when enabled in the extension settings and VS Code Settings Sync is on.
 - **Editor integration:** Use the Command Palette, editor selection context menu, or keyboard shortcuts for common actions.
+
+## How to Use
+
+1. Install the extension
+2. Look for the "Notes" tab in the sidebar (next to Explorer, Search, etc.)
+3. Click on the Notes item to open the notes panel
+4. Start typing - your notes will be automatically saved
+5. Your notes persist across different projects and VS Code sessions
 
 ## Getting Started
 

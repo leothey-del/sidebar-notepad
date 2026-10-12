@@ -2,7 +2,7 @@
   "name": "vscodesidebar-notes",
   "displayName": "Sidebar Notepad",
   "description": "Keep your thoughts organized with persistent notes that sync across projects",
-  "version": "0.1.5",
+  "version": "0.1.7",
   "publisher": "leoOrtega",
   "icon": "icon.png",
   "license": "MIT",
@@ -153,6 +153,11 @@
           "minimum": 10,
           "maximum": 24,
           "description": "Font size of the note text."
+        },
+        "sidebarQuickNotes.darkMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use a dark color palette in the notes view. When disabled, the light palette is used."
         },
         "sidebarQuickNotes.newNoteTitle": {
           "type": "string",

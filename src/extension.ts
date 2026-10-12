@@ -30,6 +30,8 @@ const CONFIG = 'sidebarQuickNotes';
 const COLORS = ['red', 'orange', 'yellow', 'green', 'blue', 'purple'];
 const MAX_TRASH = 100;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_STORED_BYTES = 3 * 1024 * 1024;
+const IMAGE_KEY_PREFIX = 'quickNotesImg:';
 
 function makeId(): string {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -111,6 +113,26 @@ function detectImageExt(b: Uint8Array): string | undefined {
     return undefined;
 }
 
+function isValidImageName(name: string): boolean {
+    return /^img-[a-z0-9]+\.(png|jpg|gif|webp)$/.test(name);
+}
+
+/** Names of the saved pictures that notes point to with ![text](img:name). */
+function imageNamesIn(notes: NotePage[]): string[] {
+    const names = new Set<string>();
+    const re = /img:([A-Za-z0-9._-]+)/g;
+    for (const n of notes) {
+        re.lastIndex = 0;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(n.content)) !== null) {
+            if (isValidImageName(m[1])) {
+                names.add(m[1]);
+            }
+        }
+    }
+    return Array.from(names);
+}
+
 function getNonce(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     let nonce = '';
@@ -175,6 +197,7 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
         return {
             autoSaveDelay: clamp(c.get<number>('autoSaveDelay', 400), 100, 5000),
             fontSize: clamp(c.get<number>('fontSize', 13), 10, 24),
+            darkMode: c.get<boolean>('darkMode', false),
             newNoteTitle: c.get<string>('newNoteTitle', 'untitled'),
             trashRetentionDays: clamp(c.get<number>('trashRetentionDays', 30), 1, 365)
         };
@@ -261,22 +284,76 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
         return vscode.Uri.joinPath(this._context.globalStorageUri, 'images');
     }
 
-    /** Saves an image next to the extension's data so notes only keep a short link to it. */
+    private async _fileExists(uri: vscode.Uri): Promise<boolean> {
+        try {
+            await vscode.workspace.fs.stat(uri);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    /** Saves a picture as a file (for showing it) and keeps a copy with the notes (so it travels with them). */
+    private async _writeImage(name: string, bytes: Uint8Array): Promise<void> {
+        const dir = this._imagesDir();
+        await vscode.workspace.fs.createDirectory(dir);
+        await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(dir, name), bytes);
+        await this._store().update(IMAGE_KEY_PREFIX + name, Buffer.from(bytes).toString('base64'));
+    }
+
     private async _storeImage(bytes: Uint8Array): Promise<void> {
         const ext = detectImageExt(bytes);
         if (!ext) {
             void vscode.window.showErrorMessage('That file is not a PNG, JPEG, GIF or WebP image.');
             return;
         }
-        if (bytes.length > MAX_IMAGE_BYTES) {
-            void vscode.window.showErrorMessage('Images must be smaller than 8 MB.');
+        if (bytes.length > MAX_STORED_BYTES) {
+            void vscode.window.showErrorMessage('That image is too large to keep with your notes (limit 3 MB after shrinking).');
             return;
         }
-        const dir = this._imagesDir();
-        await vscode.workspace.fs.createDirectory(dir);
         const file = 'img-' + makeId() + '.' + ext;
-        await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(dir, file), bytes);
+        await this._writeImage(file, bytes);
         this._post({ type: 'imageSaved', file });
+    }
+
+    /** Makes sure every picture the notes use exists as a file and is kept with the notes. */
+    private async _syncImages(): Promise<void> {
+        const store = this._store();
+        const dir = this._imagesDir();
+        for (const name of imageNamesIn(this._pages.concat(this._trash))) {
+            const file = vscode.Uri.joinPath(dir, name);
+            const kept = store.get<string>(IMAGE_KEY_PREFIX + name);
+            try {
+                if (await this._fileExists(file)) {
+                    if (!kept) {
+                        // Older pictures were only files. Keep a copy with the notes too.
+                        const bytes = await vscode.workspace.fs.readFile(file);
+                        if (bytes.length <= MAX_STORED_BYTES) {
+                            await store.update(IMAGE_KEY_PREFIX + name, Buffer.from(bytes).toString('base64'));
+                        }
+                    }
+                } else if (kept) {
+                    // The file is missing (new profile, new computer). Bring it back from the notes.
+                    await vscode.workspace.fs.createDirectory(dir);
+                    await vscode.workspace.fs.writeFile(file, Buffer.from(kept, 'base64'));
+                }
+            } catch {
+                // Leave this picture alone
+            }
+        }
+    }
+
+    private async _readImageBase64(name: string): Promise<string | undefined> {
+        const kept = this._store().get<string>(IMAGE_KEY_PREFIX + name);
+        if (kept) {
+            return kept;
+        }
+        try {
+            const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(this._imagesDir(), name));
+            return Buffer.from(bytes).toString('base64');
+        } catch {
+            return undefined;
+        }
     }
 
     private _reveal() {
@@ -289,6 +366,7 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
         }
         switch (msg.type) {
             case 'ready': {
+                await this._syncImages();
                 this._ready = true;
                 this._sendState('init');
                 const queued = this._queue;
@@ -304,7 +382,7 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
                 break;
             }
             case 'setScope':
-                this._setScope(msg.scope === 'workspace' ? 'workspace' : 'global');
+                await this._setScope(msg.scope === 'workspace' ? 'workspace' : 'global');
                 break;
             case 'copy':
                 if (typeof msg.text === 'string') {
@@ -316,6 +394,13 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
                     await vscode.workspace
                         .getConfiguration(CONFIG)
                         .update('fontSize', clamp(Math.round(msg.size), 10, 24), vscode.ConfigurationTarget.Global);
+                }
+                break;
+            case 'setDarkMode':
+                if (typeof msg.enabled === 'boolean') {
+                    await vscode.workspace
+                        .getConfiguration(CONFIG)
+                        .update('darkMode', msg.enabled, vscode.ConfigurationTarget.Global);
                 }
                 break;
             case 'openSettings':
@@ -334,7 +419,14 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
                 });
                 if (picked && picked.length > 0) {
                     try {
-                        await this._storeImage(await vscode.workspace.fs.readFile(picked[0]));
+                        const bytes = await vscode.workspace.fs.readFile(picked[0]);
+                        if (!detectImageExt(bytes)) {
+                            void vscode.window.showErrorMessage('That file is not a PNG, JPEG, GIF or WebP image.');
+                        } else if (bytes.length > MAX_IMAGE_BYTES) {
+                            void vscode.window.showErrorMessage('Images must be smaller than 8 MB.');
+                        } else {
+                            this._post({ type: 'processImage', data: Buffer.from(bytes).toString('base64') });
+                        }
                     } catch {
                         void vscode.window.showErrorMessage('Could not read that image.');
                     }
@@ -356,7 +448,7 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private _setScope(scope: Scope) {
+    private async _setScope(scope: Scope) {
         if (scope === 'workspace' && !this._hasWorkspace()) {
             void vscode.window.showInformationMessage('Open a folder to use project notes.');
             return;
@@ -364,6 +456,7 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
         this._scope = scope;
         void this._context.globalState.update(SCOPE_KEY, scope);
         this._loadState();
+        await this._syncImages();
         this._sendState('load');
     }
 
@@ -452,9 +545,23 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        const text = isJson
-            ? JSON.stringify({ app: 'sidebar-quick-notes', version: 1, exportedAt: new Date().toISOString(), pages: this._pages }, null, 2)
-            : this._pages.map(n => '# ' + n.title + '\n\n' + n.content.trim() + '\n').join('\n---\n\n');
+        let text: string;
+        if (isJson) {
+            const images: Record<string, string> = {};
+            for (const name of imageNamesIn(this._pages)) {
+                const b64 = await this._readImageBase64(name);
+                if (b64) {
+                    images[name] = b64;
+                }
+            }
+            text = JSON.stringify(
+                { app: 'sidebar-quick-notes', version: 2, exportedAt: new Date().toISOString(), pages: this._pages, images },
+                null,
+                2
+            );
+        } else {
+            text = this._pages.map(n => '# ' + n.title + '\n\n' + n.content.trim() + '\n').join('\n---\n\n');
+        }
 
         try {
             await vscode.workspace.fs.writeFile(target, Buffer.from(text, 'utf8'));
@@ -475,10 +582,14 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
         }
 
         let imported: NotePage[] = [];
+        let importedImages: Record<string, unknown> = {};
         try {
             const bytes = await vscode.workspace.fs.readFile(uris[0]);
             const data = JSON.parse(Buffer.from(bytes).toString('utf8'));
             imported = normalizeNotes(Array.isArray(data) ? data : data && data.pages);
+            if (data && data.images && typeof data.images === 'object') {
+                importedImages = data.images;
+            }
         } catch {
             imported = [];
         }
@@ -523,9 +634,26 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
             }
         }
 
+        let imageCount = 0;
+        for (const name of Object.keys(importedImages)) {
+            const b64 = importedImages[name];
+            if (!isValidImageName(name) || typeof b64 !== 'string' || b64.length > MAX_STORED_BYTES * 1.4) {
+                continue;
+            }
+            const bytes = Buffer.from(b64, 'base64');
+            const ext = detectImageExt(bytes);
+            if (!ext || !name.endsWith('.' + ext) || bytes.length > MAX_STORED_BYTES) {
+                continue;
+            }
+            await this._writeImage(name, bytes);
+            imageCount++;
+        }
+
         this._persist();
         this._sendState('load');
-        void vscode.window.showInformationMessage('Imported ' + imported.length + ' notes.');
+        void vscode.window.showInformationMessage(
+            'Imported ' + imported.length + ' notes' + (imageCount ? ' and ' + imageCount + ' images' : '') + '.'
+        );
     }
 
     /* ---------- HTML ---------- */
@@ -546,10 +674,17 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
     <title>Notes</title>
 </head>
 <body>
+    <div id="bootLoading" class="boot-loading" role="status" aria-live="polite">
+        <span id="bootSpinner" class="boot-spinner" aria-hidden="true"></span>
+        <span id="bootLoadingText">Loading notes...</span>
+    </div>
     <div id="bootError" class="boot-error" role="alert" hidden></div>
     <script nonce="${nonce}">
         (function () {
             var box = document.getElementById('bootError');
+            var loading = document.getElementById('bootLoading');
+            var spinner = document.getElementById('bootSpinner');
+            var loadingText = document.getElementById('bootLoadingText');
             function show(text) {
                 if (!box) { return; }
                 var line = document.createElement('div');
@@ -558,24 +693,52 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
                 box.hidden = false;
             }
             window.addEventListener('error', function (e) {
-                var t = e.target;
-                if (t && t.tagName === 'SCRIPT') { show('Could not load ' + String(t.src).split('/').pop()); return; }
-                show('Error: ' + e.message + ' (line ' + e.lineno + ')');
-            }, true);
-            setTimeout(function () {
-                if (!window.__notesReady) {
-                    show('Notes did not start. Make sure media/main.js is the latest version, then restart debugging.');
+                var t = e && e.target;
+                if (t && t.tagName === 'SCRIPT') {
+                    show('Could not load ' + String(t.src).split('/').pop());
+                    return;
                 }
-            }, 3000);
+                // Pictures or other files that fail to load are not script errors
+                if (t && t !== window) { return; }
+                var message = (e && e.error && e.error.message) || (e && e.message) || 'Unknown error';
+                var line = (e && typeof e.lineno === 'number') ? e.lineno : 'unknown';
+                show('Error: ' + message + ' (line ' + line + ')');
+            }, true);
+            // Replace the loading indicator with useful guidance if startup stalls.
+            var started = Date.now();
+            var slow = false;
+            var timer = setInterval(function () {
+                var select = document.getElementById('noteSelect');
+                var loaded = window.__notesReady || (select && select.options.length > 0);
+                if (loaded) {
+                    clearInterval(timer);
+                    loading.hidden = true;
+                    return;
+                }
+                if (!slow && Date.now() - started > 15000) {
+                    slow = true;
+                    spinner.hidden = true;
+                    loading.classList.add('boot-loading-slow');
+                    loadingText.textContent = 'Notes are taking longer than expected. Try reopening the Notes view.';
+                }
+            }, 500);
         })();
     </script>
-    <div class="toolbar">
+    <div class="title-row">
+        <span id="colorDot" class="color-dot" hidden></span>
+        <input type="text" id="titleInput" class="title-input" placeholder="Note title" aria-label="Note title" spellcheck="false" />
         <div class="select-wrap">
-            <select id="noteSelect" aria-label="Choose a note"></select>
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <select id="noteSelect" aria-label="Choose a note" hidden></select>
+            <button id="noteSelectBtn" class="note-picker-trigger" type="button" aria-label="Choose a note" title="Choose a note" aria-haspopup="listbox" aria-expanded="false" aria-controls="notePicker">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                 <path d="M3.2 5.7a.75.75 0 0 1 1.06 0L8 9.44l3.74-3.74a.75.75 0 1 1 1.06 1.06l-4.27 4.27a.75.75 0 0 1-1.06 0L3.2 6.76a.75.75 0 0 1 0-1.06z"/>
-            </svg>
+                </svg>
+            </button>
+            <div id="notePicker" class="note-picker" role="listbox" aria-label="Notes" hidden></div>
         </div>
+        <button id="themeBtn" class="icon-btn" title="Switch to dark mode" aria-label="Switch to dark mode">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.2 10.2A5.7 5.7 0 0 1 5.8 2.8 5.8 5.8 0 1 0 13.2 10.2z"/></svg>
+        </button>
         <button id="searchBtn" class="icon-btn" title="Search notes (Alt+Shift+S)" aria-label="Search notes">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true">
                 <circle cx="7" cy="7" r="4.25"/><path d="M10.2 10.2L14 14"/>
@@ -596,23 +759,6 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
                 <path d="M8 2.5a.75.75 0 0 1 .75.75v4h4a.75.75 0 0 1 0 1.5h-4v4a.75.75 0 0 1-1.5 0v-4h-4a.75.75 0 0 1 0-1.5h4v-4A.75.75 0 0 1 8 2.5z"/>
             </svg>
         </button>
-    </div>
-
-    <div id="panel" class="panel" hidden>
-        <div class="panel-head">
-            <input id="panelInput" class="panel-input" type="text" placeholder="Search titles and text" aria-label="Search notes" spellcheck="false" />
-            <span id="panelTitle" class="panel-title" hidden></span>
-            <button id="panelAction" class="text-btn danger" type="button" hidden>Empty trash</button>
-            <button id="panelClose" class="icon-btn small" type="button" title="Close" aria-label="Close panel">
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
-            </button>
-        </div>
-        <div id="panelList" class="panel-list" role="listbox"></div>
-    </div>
-
-    <div class="title-row">
-        <span id="colorDot" class="color-dot" hidden></span>
-        <input type="text" id="titleInput" class="title-input" placeholder="Note title" aria-label="Note title" spellcheck="false" />
         <button id="pinBtn" class="icon-btn" title="Pin note to the top" aria-label="Pin note" aria-pressed="false">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" aria-hidden="true">
                 <path class="fill-on-press" d="M8 1.6l1.95 4 4.4.62-3.2 3.1.78 4.38L8 11.65l-3.93 2.05.78-4.38-3.2-3.1 4.4-.62z"/>
@@ -633,6 +779,18 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
         </div>
     </div>
 
+    <div id="panel" class="panel" hidden>
+        <div class="panel-head">
+            <input id="panelInput" class="panel-input" type="text" placeholder="Search titles and text" aria-label="Search notes" spellcheck="false" />
+            <span id="panelTitle" class="panel-title" hidden></span>
+            <button id="panelAction" class="text-btn danger" type="button" hidden>Empty trash</button>
+            <button id="panelClose" class="icon-btn small" type="button" title="Close" aria-label="Close panel">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+            </button>
+        </div>
+        <div id="panelList" class="panel-list" role="listbox"></div>
+    </div>
+
     <div id="linkRow" class="link-row" hidden>
         <button id="linkBtn" class="link-btn" type="button">
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true">
@@ -648,6 +806,13 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
     <div class="editor">
         <textarea id="noteInput" placeholder="Start typing. Your note saves automatically." aria-label="Note content"></textarea>
         <div id="preview" class="preview" hidden></div>
+        <div id="imgHandle" class="img-handle" title="Drag to resize" hidden></div>
+        <div id="imgBar" class="img-bar" role="toolbar" aria-label="Image size" hidden>
+            <button type="button" class="text-btn" data-size="small" title="Small">S</button>
+            <button type="button" class="text-btn" data-size="medium" title="Medium">M</button>
+            <button type="button" class="text-btn" data-size="large" title="Full width">L</button>
+            <button type="button" class="text-btn" data-size="original" title="Original size">Reset</button>
+        </div>
     </div>
 
     <div class="footer">
