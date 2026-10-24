@@ -15,7 +15,11 @@
             "autoReload": {
                 "enable": true,
                 "watch": [
-                    "${workspaceFolder}/out/**/*.js"
+                    "${workspaceFolder}/out/**/*.js",
+                    "${workspaceFolder}/media/main.js",
+                    "${workspaceFolder}/media/main.css",
+                    "${workspaceFolder}/media/ai/**/*",
+                    "${workspaceFolder}/media/highlight.js"
                 ],
                 "restart": true,
                 "delay": 1000

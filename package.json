@@ -2,7 +2,7 @@
   "name": "vscodesidebar-notes",
   "displayName": "Sidebar Notepad",
   "description": "Keep your thoughts organized with persistent notes that sync across projects",
-  "version": "0.1.7",
+  "version": "0.4.5",
   "publisher": "leoOrtega",
   "icon": "icon.png",
   "license": "MIT",
@@ -15,7 +15,7 @@
   },
   "homepage": "https://github.com/leothey-del/sidebar-notepad#readme",
   "engines": {
-    "vscode": "^1.75.0"
+    "vscode": "^1.90.0"
   },
   "categories": [
     "Notebooks",
@@ -34,12 +34,22 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "sidebarNotepad",
+          "title": "Notes",
+          "icon": "media/notes-view.svg"
+        }
+      ]
+    },
     "views": {
-      "explorer": [
+      "sidebarNotepad": [
         {
           "type": "webview",
           "id": "notesView",
-          "name": "Notes"
+          "name": "Notes",
+          "icon": "media/notes-view.svg"
         }
       ]
     },
@@ -76,12 +86,27 @@
       },
       {
         "command": "quickNotes.exportNotes",
-        "title": "Export Notes",
+        "title": "Export All Global Notes",
         "category": "Quick Notes"
       },
       {
         "command": "quickNotes.importNotes",
         "title": "Import Notes",
+        "category": "Quick Notes"
+      },
+      {
+        "command": "quickNotes.activateProLicense",
+        "title": "Activate Pro License",
+        "category": "Quick Notes"
+      },
+      {
+        "command": "quickNotes.deactivateProLicense",
+        "title": "Deactivate Pro License",
+        "category": "Quick Notes"
+      },
+      {
+        "command": "quickNotes.newNoteFromTerminal",
+        "title": "New Note from Terminal Command",
         "category": "Quick Notes"
       }
     ],
@@ -98,6 +123,12 @@
           "group": "9_cutcopypaste@100"
         }
       ],
+      "terminal/context": [
+        {
+          "command": "quickNotes.newNoteFromTerminal",
+          "group": "navigation"
+        }
+      ],
       "commandPalette": [
         {
           "command": "quickNotes.addSelection",
@@ -106,6 +137,9 @@
         {
           "command": "quickNotes.newNoteFromSelection",
           "when": "editorHasSelection"
+        },
+        {
+          "command": "quickNotes.newNoteFromTerminal"
         }
       ]
     },
@@ -150,14 +184,9 @@
         "sidebarQuickNotes.fontSize": {
           "type": "number",
           "default": 13,
-          "minimum": 10,
+          "minimum": 1,
           "maximum": 24,
           "description": "Font size of the note text."
-        },
-        "sidebarQuickNotes.darkMode": {
-          "type": "boolean",
-          "default": false,
-          "description": "Use a dark color palette in the notes view. When disabled, the light palette is used."
         },
         "sidebarQuickNotes.newNoteTitle": {
           "type": "string",
@@ -179,6 +208,40 @@
           "maximum": 365,
           "description": "How many days deleted notes stay in Trash before they are removed for good."
         },
+        "sidebarQuickNotes.ai.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable AI actions for notes. Note text is sent to the selected VS Code language model when you run an action."
+        },
+        "sidebarQuickNotes.ai.modelFamily": {
+          "type": "string",
+          "default": "",
+          "description": "Preferred Copilot model family for AI actions. Leave empty to use an available model."
+        },
+        "sidebarQuickNotes.ai.polar.organizationId": {
+          "type": "string",
+          "default": "78e00919-a1d4-4deb-a77f-a82227d00581",
+          "description": "Polar organization UUID used to verify Pro license keys."
+        },
+        "sidebarQuickNotes.ai.polar.benefitId": {
+          "type": "string",
+          "default": "f9488571-6980-492f-b82e-be64240a7489",
+          "description": "Polar benefit UUID for the Pro license."
+        },
+        "sidebarQuickNotes.ai.polar.environment": {
+          "type": "string",
+          "enum": [
+            "production",
+            "sandbox"
+          ],
+          "default": "sandbox",
+          "description": "Polar API environment used to verify license keys. Select sandbox for test keys."
+        },
+        "sidebarQuickNotes.ai.polar.checkoutUrl": {
+          "type": "string",
+          "default": "https://sandbox-api.polar.sh/v1/checkout-links/polar_cl_zHcTQ91zgbD1rSm9RGiu9N2MDdFI0a8IyHxdi0izkJp/redirect",
+          "description": "Polar checkout link opened when users upgrade to Pro."
+        },
         "sidebarQuickNotes.syncWithSettingsSync": {
           "type": "boolean",
           "default": false,
@@ -189,13 +252,20 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "build:webview": "esbuild webview/highlight.js --bundle --minify --platform=browser --outfile=media/highlight.js",
+    "compile": "npm run build:webview && tsc -p ./",
+    "watch": "npm run build:webview && tsc -watch -p ./"
   },
   "devDependencies": {
     "@types/node": "^16.x",
     "@types/vscode": "^1.75.0",
+    "esbuild": "^0.28.2",
+    "highlight.js": "^11.12.0",
     "typescript": "^4.9.5"
+  },
+  "dependencies": {
+    "@vscode/codicons": "^0.0.46-24",
+    "marked": "^16.0.0"
   },
   "funding": {
     "type": "ko-fi",
