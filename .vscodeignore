@@ -1,10 +1,10 @@
 .vscode/**
-node_modules/**
-src/**
+.gitignore
 images/**
+src/**
+webview/**
 tsconfig.json
 package-lock.json
 *.vsix
 **/*.map
 **/*.ts
-!out/**
