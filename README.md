@@ -6,7 +6,7 @@ Keep notes close to your code in a dedicated VS Code Explorer view. Create and o
 
 ## Screenshots
 
-![Sidebar Quick Notes screenshot 1](https://raw.githubusercontent.com/leothey-del/sidebar-notepad/main/images/image8.png)
+![Sidebar Quick Notes screenshot 1](https://raw.githubusercontent.com/leothey-del/sidebar-notepad/main/images/image2.png)
 
 
 ## Features
@@ -21,6 +21,7 @@ Keep notes close to your code in a dedicated VS Code Explorer view. Create and o
 - **Code capture:** Add selected editor text to the current note or create a new note from the selection. Captured snippets include a language-tagged code block and a link to the source file when available.
 - **Terminal commands:** Browse commands run in the integrated terminal today, newest first, and add individual commands to the current note.
 - **File links:** Attach the active file and line to a note, then jump back to that location from the note.
+- **AI tools:** Suggest a title, summarize a note, extract checklist tasks, explain an error or log, or ask questions about your notes. Choose a VS Code language model, then review, copy, or apply the response. Answers about your notes can include links to their source notes.
 - **Trash and undo:** Undo a recent deletion, restore notes from Trash, or permanently remove notes. Trash is limited to the newest 100 notes and expires according to the retention setting.
 - **Import and export:** Export notes as JSON backup or Markdown. Import a JSON backup by merging notes or replacing the current set.
 - **Global or project notes:** Choose extension-wide notes or notes stored with the current workspace.
@@ -41,8 +42,9 @@ Keep notes close to your code in a dedicated VS Code Explorer view. Create and o
 3. Use the note selector or previous/next buttons to move between notes.
 4. Use the eye button to preview Markdown. When the preview is on, the button is outlined; click it again to go back to editing. Open the **More actions** menu for note organization, Trash, import/export, font size, storage scope, and settings.
    Right-click a supported icon in the More actions panel to add that action to the toolbar; right-click it again to unpin it. The New note button cannot be unpinned; the note selector and More actions buttons do not have a right-click action.
-5. Copy a picture and press `Ctrl+V` (`Cmd+V` on macOS) in a note to add it. The note switches to preview so you can see the image.
-6. Select text in a code editor and use the editor context menu to add it to a note or create a note from it.
+5. Open **More actions** to run an AI tool. Sign in to GitHub Copilot or configure an AI provider in VS Code, then choose a model. AI actions send the relevant note text to the selected model; **Ask your notes** can search your notes to answer a question.
+6. Copy a picture and press `Ctrl+V` (`Cmd+V` on macOS) in a note to add it. The note switches to preview so you can see the image.
+7. Select text in a code editor and use the editor context menu to add it to a note or create a note from it.
 
 ## Images
 
@@ -93,13 +95,15 @@ Open **Settings** and search for `Sidebar Quick Notes`:
 | `sidebarQuickNotes.fontSize` | `13` | Note text size in pixels. Range: 10-24. |
 | `sidebarQuickNotes.newNoteTitle` | `untitled` | Start new notes as `Untitled` or with today's date. |
 | `sidebarQuickNotes.trashRetentionDays` | `30` | Days deleted notes remain in Trash. Range: 1-365. |
+| `sidebarQuickNotes.ai.enabled` | `true` | Enable or disable AI actions. Note text is sent to the selected VS Code language model when you run an action. |
+| `sidebarQuickNotes.ai.modelFamily` | empty | Preferred Copilot model family for AI actions. Leave empty to choose from available models. |
 | `sidebarQuickNotes.syncWithSettingsSync` | `false` | Include global notes in VS Code Settings Sync. |
 | `sidebarQuickNotes.ai.polar.organizationId` | configured | Polar organization UUID for license validation. |
 | `sidebarQuickNotes.ai.polar.benefitId` | configured | Polar Pro benefit UUID. |
 | `sidebarQuickNotes.ai.polar.environment` | `sandbox` | Polar API environment used to validate license keys. |
-| `sidebarQuickNotes.ai.polar.checkoutUrl` | configured | Polar Sandbox checkout link opened by the upgrade prompt. |
+| `sidebarQuickNotes.ai.polar.checkoutUrl` | configured | Polar checkout link opened by the upgrade prompt. |
 
-AI features include five free generations in each rolling 24-hour period. Configure the Polar settings above, then run **Quick Notes: Activate Pro License** to enter a key; it is stored in VS Code SecretStorage and validated with Polar. Run **Quick Notes: Deactivate Pro License** to remove it. A valid Pro license unlocks unlimited generations. Free usage is tracked locally per VS Code profile.
+AI features include five free generations in each rolling 24-hour period. Usage is tracked locally in your VS Code profile. A valid Polar Pro license unlocks unlimited generations. To activate one, configure the Polar organization and benefit IDs, then run **Quick Notes: Activate Pro License** from the Command Palette and enter your key. The key is stored in VS Code SecretStorage and validated with Polar. Run **Quick Notes: Deactivate Pro License** to remove it.
 
 ## Commands
 
