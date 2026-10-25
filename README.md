@@ -6,7 +6,7 @@ Keep notes close to your code in a dedicated VS Code Explorer view. Create and o
 
 ## Screenshots
 
-![Sidebar Quick Notes screenshot 1](https://raw.githubusercontent.com/leothey-del/sidebar-notepad/main/images/image2.png)
+![Sidebar Quick Notes screenshot 1](https://github.com/leothey-del/sidebar-notepad/blob/main/images/image2.png)
 
 
 ## Features
