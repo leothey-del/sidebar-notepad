@@ -97,12 +97,6 @@ Open **Settings** and search for `Sidebar Quick Notes`:
 | `sidebarQuickNotes.trashRetentionDays` | `30` | Days deleted notes remain in Trash. Range: 1-365. |
 | `sidebarQuickNotes.ai.enabled` | `true` | Enable or disable AI actions. Note text is sent to the selected VS Code language model when you run an action. |
 | `sidebarQuickNotes.ai.modelFamily` | empty | Preferred Copilot model family for AI actions. Leave empty to choose from available models. |
-| `sidebarQuickNotes.syncWithSettingsSync` | `false` | Include global notes in VS Code Settings Sync. |
-| `sidebarQuickNotes.ai.polar.organizationId` | configured | Polar organization UUID for license validation. |
-| `sidebarQuickNotes.ai.polar.benefitId` | configured | Polar Pro benefit UUID. |
-| `sidebarQuickNotes.ai.polar.environment` | `sandbox` | Polar API environment used to validate license keys. |
-| `sidebarQuickNotes.ai.polar.checkoutUrl` | configured | Polar checkout link opened by the upgrade prompt. |
-
 AI features include five free generations in each rolling 24-hour period. Usage is tracked locally in your VS Code profile. A valid Polar Pro license unlocks unlimited generations. To activate one, configure the Polar organization and benefit IDs, then run **Quick Notes: Activate Pro License** from the Command Palette and enter your key. The key is stored in VS Code SecretStorage and validated with Polar. Run **Quick Notes: Deactivate Pro License** to remove it.
 
 ## Commands

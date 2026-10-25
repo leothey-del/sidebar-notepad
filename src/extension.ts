@@ -796,9 +796,6 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
                         .update('fontSize', clamp(Math.round(msg.size), 1, 24), vscode.ConfigurationTarget.Global);
                 }
                 break;
-            case 'openSettings':
-                void vscode.commands.executeCommand('workbench.action.openSettings', CONFIG);
-                break;
             case 'saveImage':
                 if (typeof msg.data === 'string' && msg.data.length < MAX_IMAGE_BYTES * 1.4) {
                     await this._storeImage(Buffer.from(msg.data, 'base64'), msg.pasted === true);

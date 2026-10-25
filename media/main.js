@@ -2339,7 +2339,6 @@
             persistIfPending();
             vscode.postMessage({ type: 'setScope', scope: toProject ? 'workspace' : 'global' });
         }, { disabled: toProject && !hasWorkspace, hint: toProject && !hasWorkspace ? 'open a folder' : (scope === 'global' ? 'now: global' : 'now: project'), pinnable: false });
-        addMenuItem('Settings', function () { vscode.postMessage({ type: 'openSettings' }); }, { pinnable: false });
         addMenuSep();
         addMenuItem('Delete note', deleteCurrent, { danger: true, pinnable: false });
 
