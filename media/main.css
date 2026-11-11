@@ -1950,10 +1950,6 @@ body:has(.note-picker:not([hidden])) .img-handle {
     visibility: hidden;
 }
 
-body:has(.menu.icons-only:not([hidden])) .img-handle {
-    visibility: hidden;
-}
-
 .img-bar {
     position: absolute;
     left: 50%;

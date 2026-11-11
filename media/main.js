@@ -368,6 +368,24 @@
         return '<button class="code-copy-button" type="button" title="Copy code" aria-label="Copy code"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg></button>';
     }
 
+    function setCodeCopyButtonCopied(button, copied) {
+        var timer = codeCopyTimers.get(button);
+        if (timer) { clearTimeout(timer); }
+        button.classList.toggle('copied', copied);
+        button.title = copied ? 'Copied' : 'Copy code';
+        button.setAttribute('aria-label', copied ? 'Code copied' : 'Copy code');
+        button.innerHTML = copied
+            ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>'
+            : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>';
+        if (copied) {
+            codeCopyTimers.set(button, setTimeout(function () {
+                if (button.isConnected) { setCodeCopyButtonCopied(button, false); }
+            }, 1800));
+        } else {
+            codeCopyTimers.delete(button);
+        }
+    }
+
     function codeBlockHtml(codeHtml) {
         return '<div class="code-block">' + codeCopyButton() + '<pre>' + codeHtml + '</pre></div>';
     }
@@ -645,6 +663,9 @@
     var selectedImage = null;
     var pendingImageCut = null;
     var imageCutRequestId = 0;
+    var codeCopyRequestId = 0;
+    var pendingCodeCopies = Object.create(null);
+    var codeCopyTimers = new WeakMap();
     var confirmTimers = new WeakMap();
 
     function $(id) { return document.getElementById(id); }
@@ -1040,6 +1061,7 @@
                     : toolbarPinned.concat(item.id);
                 applyToolbarPins();
                 saveViewState();
+                vscode.postMessage({ type: 'saveToolbarPins', toolbarPins: toolbarPinned });
                 closeToolbarContextMenu();
             });
             el.toolbarContextMenu.appendChild(button);
@@ -1377,16 +1399,37 @@
 
     function positionImageTools() {
         var img = findSelectedImg();
-        if (!img || el.preview.hidden) { el.imgHandle.hidden = true; return; }
+        if (!img || el.preview.hidden || (menuOpen && !menuUsesIconsOnly())) {
+            el.imgHandle.hidden = true;
+            return;
+        }
         var r = img.getBoundingClientRect();
         var p = el.preview.getBoundingClientRect();
         var host = el.preview.parentElement.getBoundingClientRect();
-        var inView = r.bottom >= p.top + 6 && r.bottom <= p.bottom - 2;
-        el.imgHandle.hidden = !inView;
-        if (!inView) { return; }
-        var x = Math.min(r.right, p.right - 10);
-        el.imgHandle.style.left = Math.round(x - host.left - 6) + 'px';
-        el.imgHandle.style.top = Math.round(r.bottom - host.top - 6) + 'px';
+        var handleSize = 12;
+        var visibleLeft = Math.max(r.left, p.left);
+        var visibleRight = Math.min(r.right, p.right);
+        var visibleTop = Math.max(r.top, p.top);
+        var visibleBottom = Math.min(r.bottom, p.bottom);
+        if (visibleRight <= visibleLeft || visibleBottom <= visibleTop) {
+            el.imgHandle.hidden = true;
+            return;
+        }
+        var x = Math.max(p.left, Math.min(visibleRight - handleSize / 2, p.right - handleSize));
+        var y = Math.max(p.top, Math.min(visibleBottom - handleSize / 2, p.bottom - handleSize));
+        var menuRect = menuOpen && menuUsesIconsOnly() ? el.menu.getBoundingClientRect() : null;
+        var overlapsMenu = menuRect && x < menuRect.right && x + handleSize > menuRect.left &&
+            y < menuRect.bottom && y + handleSize > menuRect.top;
+        if (overlapsMenu) {
+            x = menuRect.left - handleSize - 2;
+            if (x < visibleLeft || x + handleSize > visibleRight) {
+                el.imgHandle.hidden = true;
+                return;
+            }
+        }
+        el.imgHandle.hidden = false;
+        el.imgHandle.style.left = Math.round(x - host.left) + 'px';
+        el.imgHandle.style.top = Math.round(y - host.top) + 'px';
     }
 
     function reselectImage() {
@@ -2166,6 +2209,7 @@
         }
         b.setAttribute('role', 'menuitem');
         b.setAttribute('aria-label', label + (opts.hint ? ', ' + opts.hint : ''));
+        b.title = label + (opts.hint ? ' (' + opts.hint + ')' : '');
         var content = document.createElement('span');
         content.className = 'menu-item-content';
         content.innerHTML = opts.icon || menuIcon(label);
@@ -2197,10 +2241,12 @@
                 }
                 b.dataset.armed = '1';
                 span.textContent = opts.confirm;
+                b.title = opts.confirm;
                 b.classList.add('armed');
                 setTimeout(function () {
                     b.dataset.armed = '';
                     span.textContent = label;
+                    b.title = label + (opts.hint ? ' (' + opts.hint + ')' : '');
                     b.classList.remove('armed');
                 }, 3000);
                 return;
@@ -2244,6 +2290,7 @@
         button.type = 'button';
         button.className = 'menu-layout-toggle';
         button.setAttribute('aria-label', showLabels ? 'Show action labels' : 'Show icons only');
+        button.title = showLabels ? 'Show action labels' : 'Show icons only';
         button.setAttribute('aria-pressed', showLabels ? 'true' : 'false');
         button.innerHTML = showLabels
             ? '<span class="codicon codicon-chevron-left" aria-hidden="true"></span>'
@@ -2281,6 +2328,7 @@
         closeButton.className = 'menu-close';
         closeButton.setAttribute('role', 'menuitem');
         closeButton.setAttribute('aria-label', 'Close actions menu');
+        closeButton.title = 'Close actions menu';
         closeButton.innerHTML = '<span class="codicon codicon-close" aria-hidden="true"></span>';
         closeButton.addEventListener('click', function () {
             closeMenu();
@@ -2351,8 +2399,8 @@
         menuOpen = true;
         el.menu.hidden = false;
         el.preview.classList.add('menu-open');
-        el.imgHandle.hidden = true;
         el.imgBar.hidden = true;
+        positionImageTools();
         el.menuBtn.setAttribute('aria-expanded', 'true');
         var first = el.menu.querySelector('.menu-layout-toggle, .menu-item:not(:disabled)');
         if (first) { first.focus(); }
@@ -2868,7 +2916,9 @@
         if (!code) { return; }
         e.preventDefault();
         e.stopPropagation();
-        vscode.postMessage({ type: 'copy', text: code.textContent || '' });
+        var requestId = ++codeCopyRequestId;
+        pendingCodeCopies[requestId] = button;
+        vscode.postMessage({ type: 'copy', text: code.textContent || '', requestId: requestId });
     });
 
     // Your hint: clicking the preview flashes the eye button to show how to edit
@@ -3127,7 +3177,7 @@
         if (restoreState) {
             var saved = vscode.getState() || {};
             if (saved.menuLayout === 'icons' || saved.menuLayout === 'labels') { menuLayout = saved.menuLayout; }
-            toolbarPinned = saved.toolbarPinsVersion === 2 && Array.isArray(saved.toolbarPinned)
+            var localToolbarPins = saved.toolbarPinsVersion === 2 && Array.isArray(saved.toolbarPinned)
                 ? saved.toolbarPinned.filter(function (id) {
                     return ['searchBtn', 'terminalBtn', 'pinBtn', 'previewBtn'].indexOf(id) !== -1 ||
                         (typeof id === 'string' && /^menu:[a-z0-9-]+$/.test(id));
@@ -3139,6 +3189,10 @@
                         })
                         : []
                 );
+            toolbarPinned = Array.isArray(msg.toolbarPins) ? msg.toolbarPins : localToolbarPins;
+            if (!Array.isArray(msg.toolbarPins)) {
+                vscode.postMessage({ type: 'saveToolbarPins', toolbarPins: toolbarPinned });
+            }
             if (saved.currentId) { currentId = saved.currentId; }
             var untouchedDraft = pages.find(function (note) { return note.id === saved.untouchedNewNoteId; });
             untouchedNewNoteId = untouchedDraft && isBlankNote(untouchedDraft) ? untouchedDraft.id : null;
@@ -3162,6 +3216,24 @@
         saveViewState();
     }
 
+    function applySyncedState(msg) {
+        if (Array.isArray(msg.toolbarPins)) {
+            toolbarPinned = msg.toolbarPins;
+            applyToolbarPins();
+        }
+        if (pendingSave) {
+            var localNote = currentNote();
+            var syncedPages = Array.isArray(msg.pages) ? msg.pages.slice() : [];
+            if (localNote) {
+                var localIndex = syncedPages.findIndex(function (note) { return note.id === localNote.id; });
+                if (localIndex === -1) { syncedPages.unshift(localNote); }
+                else { syncedPages[localIndex] = localNote; }
+            }
+            msg = Object.assign({}, msg, { pages: syncedPages });
+        }
+        applyLoad(msg, false);
+    }
+
     document.addEventListener('visibilitychange', function () {
         if (!document.hidden) { animateTitleOnOpen(); }
     });
@@ -3176,6 +3248,14 @@
         switch (msg.type) {
             case 'init': applyLoad(msg, true); break;
             case 'load': applyLoad(msg, false); break;
+            case 'sync': applySyncedState(msg); break;
+            case 'toolbarPins':
+                if (Array.isArray(msg.toolbarPins)) {
+                    toolbarPinned = msg.toolbarPins;
+                    applyToolbarPins();
+                    saveViewState();
+                }
+                break;
             case 'activityStatus':
                 if (typeof msg.status === 'string') {
                     setFooterActivityStatus(msg.status, msg.duration);
@@ -3198,6 +3278,11 @@
                 setBackgroundStatus('Could not finish restoring saved images.', true);
                 break;
             case 'copyComplete':
+                if (typeof msg.requestId === 'number' && pendingCodeCopies[msg.requestId]) {
+                    var copiedCodeButton = pendingCodeCopies[msg.requestId];
+                    delete pendingCodeCopies[msg.requestId];
+                    setCodeCopyButtonCopied(copiedCodeButton, true);
+                }
                 [menuToolbarActions['menu:copy-note'] && menuToolbarActions['menu:copy-note'].button]
                     .concat(Array.prototype.slice.call(el.pinnedMenuActions.querySelectorAll('[data-toolbar-pin-id="menu:copy-note"]')))
                     .filter(Boolean)
@@ -3207,6 +3292,7 @@
                 flash('Copied');
                 break;
             case 'copyFailed':
+                if (typeof msg.requestId === 'number') { delete pendingCodeCopies[msg.requestId]; }
                 flash('Could not copy');
                 break;
             case 'imageCutMarkdownCopied':

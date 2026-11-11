@@ -6,15 +6,15 @@ Keep notes close to your code in a dedicated VS Code Explorer view. Create and o
 
 ## Screenshots
 
-![Sidebar Quick Notes screenshot 1](https://github.com/leothey-del/sidebar-notepad/blob/main/images/image2.png)
+![Sidebar Quick Notes screenshot 1](https://raw.githubusercontent.com/leothey-del/sidebar-notepad/main/images/image2.png)
 
 
 ## Features
 
 - **Multiple notes:** Create, duplicate, pin, color-label, and title notes. Pinned notes stay at the top.
 - **Theme matching:** The Notes view follows the active VS Code color theme.
-- **Customizable toolbar:** Right-click supported toolbar actions or More actions entries to pin or unpin them. Pinned actions appear beside **+** in the order they were pinned. The New note button is always visible; the note selector and More actions buttons are not customizable.
-- **Automatic saving:** Edits save after a configurable delay. The view remembers the selected note.
+- **Customizable toolbar:** Right-click supported toolbar actions or More actions entries to pin or unpin them. Pinned actions appear beside **+** in the order they were pinned and are shared across VS Code windows in the same profile. The New note button is always visible; the note selector and More actions buttons are not customizable.
+- **Automatic saving and window updates:** Edits save after a configurable delay, and notes and toolbar icons update automatically in other open VS Code windows using the same profile. Project notes update in windows opened on the same workspace. The view remembers the selected note.
 - **Search:** Find notes by title or content, with matching text snippets.
 - **Markdown preview:** Preview headings, lists, task lists, tables, blockquotes, links, images, and common inline formatting. Fenced code blocks use their declared language for syntax highlighting, and recognizable unfenced code snippets are highlighted automatically. Task checkboxes can be toggled in the preview. Each note remembers whether it was in preview or edit mode, and the eye button is outlined while a preview is showing. This is a lightweight preview, not full CommonMark support.
 - **Images:** Paste a copied picture or screenshot straight into a note, or insert an image file from the More actions menu. Images appear in the preview. Markdown image links (`![text](https://...)`) work too.

@@ -32,6 +32,18 @@ interface NotePage {
     deletedAt?: number;
 }
 
+interface WindowSyncSignal {
+    version: 1;
+    writer: string;
+    revision: string;
+    timestamp: number;
+    scope: Scope;
+    type: 'notes' | 'toolbar';
+    pages?: NotePage[];
+    trash?: NotePage[];
+    toolbarPins?: string[];
+}
+
 type Scope = 'global' | 'workspace';
 
 // Keep PAGES_KEY the same as earlier versions so existing users keep their notes
@@ -39,6 +51,8 @@ const PAGES_KEY = 'quickNotesPagesV3';
 const TRASH_KEY = 'quickNotesTrashV1';
 const SCOPE_KEY = 'quickNotesScope';
 const TERMINAL_COMMANDS_KEY = 'quickNotesTerminalCommandsV1';
+const TOOLBAR_PINS_KEY = 'quickNotesToolbarPinsV1';
+const SYNC_FILE_PREFIX = 'window-sync-';
 const CONFIG = 'sidebarQuickNotes';
 const COLORS = ['red', 'orange', 'yellow', 'green', 'blue', 'purple'];
 const MAX_TRASH = 100;
@@ -71,6 +85,17 @@ function normalizeTerminalCommandHistory(raw: unknown, today: string): TerminalC
         return result;
     }, []);
     return { date: today, commands };
+}
+
+function normalizeToolbarPins(raw: unknown): string[] | undefined {
+    if (!Array.isArray(raw)) {
+        return undefined;
+    }
+    return raw.filter((id): id is string =>
+        typeof id === 'string' &&
+        (['searchBtn', 'terminalBtn', 'pinBtn', 'previewBtn'].indexOf(id) !== -1 ||
+            /^menu:[a-z0-9-]+$/.test(id))
+    );
 }
 
 interface NoteDocumentIdentity {
@@ -270,7 +295,7 @@ export function activate(context: vscode.ExtensionContext) {
             const identity = noteDocumentIdentity(document.uri);
             if (identity) {
                 provider.updateNoteFromEditor(identity.scope, identity.id, document.getText());
-                provider.flushEditorWrites();
+                void provider.flushEditorWrites();
             }
         }),
         vscode.commands.registerCommand('quickNotes.newNote', () => provider.sendCommand('new')),
@@ -291,7 +316,7 @@ export function activate(context: vscode.ExtensionContext) {
         }),
         new vscode.Disposable(() => {
             editorSaveTimers.forEach(timer => clearTimeout(timer));
-            provider.flushEditorWrites();
+            void provider.flushEditorWrites();
         })
     );
 
@@ -325,6 +350,10 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
     private _lastTerminalCommand?: { command: string; cwd?: string; timestamp: number };
     private _terminalHistory: TerminalCommandHistory;
     private _terminalHistoryWrite: Promise<void> = Promise.resolve();
+    private readonly _syncWriter = makeId();
+    private _syncRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    private _seenSyncRevisions = new Map<string, string>();
+    private _lastSyncTimestamps = new Map<string, number>();
 
     constructor(private readonly _context: vscode.ExtensionContext) {
         const savedScope = _context.globalState.get<Scope>(SCOPE_KEY, 'global');
@@ -340,6 +369,20 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
         this._ai = new NotesAi(_context, message => this._post(message), () =>
             this._pages.map(note => ({ id: note.id, title: note.title, content: note.content, updated: note.updated }))
         );
+        _context.subscriptions.push(new vscode.Disposable(() => {
+            this._syncRefreshTimers.forEach(timer => clearTimeout(timer));
+            void this._cleanupSyncFiles();
+        }));
+        void this._watchSyncStorage(_context.globalStorageUri, 'global').catch(error => {
+            console.error('Could not watch global note storage for changes:', error);
+            void vscode.window.showErrorMessage('Could not enable cross-window updates for Sidebar Notepad.');
+        });
+        if (_context.storageUri) {
+            void this._watchSyncStorage(_context.storageUri, 'workspace').catch(error => {
+                console.error('Could not watch workspace note storage for changes:', error);
+                void vscode.window.showErrorMessage('Could not enable cross-window updates for Sidebar Notepad.');
+            });
+        }
     }
 
     public activateProLicense(): Promise<void> {
@@ -482,10 +525,198 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
             .slice(0, MAX_TRASH);
     }
 
-    private _persist() {
+    private async _persist(): Promise<void> {
         const store = this._store();
-        void store.update(PAGES_KEY, this._pages);
-        void store.update(TRASH_KEY, this._trash);
+        try {
+            await Promise.all([
+                store.update(PAGES_KEY, this._pages),
+                store.update(TRASH_KEY, this._trash)
+            ]);
+            await this._broadcastSync(this._scope, 'notes');
+        } catch (error) {
+            console.error('Could not save notes:', error);
+            void vscode.window.showErrorMessage('Could not save Sidebar Notepad notes.');
+        }
+    }
+
+    private async _watchSyncStorage(storageUri: vscode.Uri, scope: Scope): Promise<void> {
+        await vscode.workspace.fs.createDirectory(storageUri);
+        const watcher = vscode.workspace.createFileSystemWatcher(
+            new vscode.RelativePattern(storageUri, SYNC_FILE_PREFIX + '*.json')
+        );
+        const handleChange = (uri: vscode.Uri) => {
+            const key = uri.toString();
+            const previous = this._syncRefreshTimers.get(key);
+            if (previous) {
+                clearTimeout(previous);
+            }
+            this._syncRefreshTimers.set(key, setTimeout(() => {
+                this._syncRefreshTimers.delete(key);
+                void this._handleSyncSignal(uri, scope);
+            }, 50));
+        };
+        watcher.onDidCreate(handleChange, this, this._context.subscriptions);
+        watcher.onDidChange(handleChange, this, this._context.subscriptions);
+        this._context.subscriptions.push(watcher);
+    }
+
+    private async _refreshSyncStateFromFiles(): Promise<void> {
+        const storages: Array<{ uri: vscode.Uri; scope: Scope }> = [
+            { uri: this._context.globalStorageUri, scope: 'global' }
+        ];
+        if (this._context.storageUri) {
+            storages.push({ uri: this._context.storageUri, scope: 'workspace' });
+        }
+
+        for (const storage of storages) {
+            await vscode.workspace.fs.createDirectory(storage.uri);
+            const entries = await vscode.workspace.fs.readDirectory(storage.uri);
+            const signals: Array<{ uri: vscode.Uri; signal: Partial<WindowSyncSignal> }> = [];
+            for (const [name] of entries) {
+                if (!name.startsWith(SYNC_FILE_PREFIX) || !name.endsWith('.json')) {
+                    continue;
+                }
+                const uri = vscode.Uri.joinPath(storage.uri, name);
+                try {
+                    const bytes = await vscode.workspace.fs.readFile(uri);
+                    const signal = JSON.parse(Buffer.from(bytes).toString('utf8')) as Partial<WindowSyncSignal>;
+                    if (signal.version === 1 && signal.scope === storage.scope &&
+                        typeof signal.timestamp === 'number' && typeof signal.writer === 'string' &&
+                        typeof signal.revision === 'string') {
+                        signals.push({ uri, signal });
+                    }
+                } catch (error) {
+                    console.error('Could not read cross-window note state:', error);
+                }
+            }
+
+            const latestNotes = signals
+                .filter(item => item.signal.type === 'notes')
+                .sort((a, b) => (b.signal.timestamp || 0) - (a.signal.timestamp || 0))[0];
+            const latestToolbar = storage.scope === 'global'
+                ? signals
+                    .filter(item => item.signal.type === 'toolbar' && Array.isArray(item.signal.toolbarPins))
+                    .sort((a, b) => (b.signal.timestamp || 0) - (a.signal.timestamp || 0))[0]
+                : undefined;
+            if (latestNotes) {
+                await this._handleSyncSignal(latestNotes.uri, storage.scope, false);
+            }
+            if (latestToolbar && latestToolbar !== latestNotes) {
+                await this._handleSyncSignal(latestToolbar.uri, storage.scope, false);
+            }
+        }
+    }
+
+    private async _broadcastSync(scope: Scope, type: 'notes' | 'toolbar'): Promise<void> {
+        const storageUri = scope === 'global' ? this._context.globalStorageUri : this._context.storageUri;
+        if (!storageUri) {
+            return;
+        }
+        const store = this._storeForScope(scope);
+        const signal: WindowSyncSignal = {
+            version: 1,
+            writer: this._syncWriter,
+            revision: makeId(),
+            timestamp: Date.now(),
+            scope,
+            type
+        };
+        if (type === 'notes') {
+            signal.pages = normalizeNotes(store.get<unknown>(PAGES_KEY));
+            signal.trash = normalizeNotes(store.get<unknown>(TRASH_KEY), true);
+        } else {
+            signal.toolbarPins = normalizeToolbarPins(this._context.globalState.get<unknown>(TOOLBAR_PINS_KEY));
+        }
+
+        try {
+            await vscode.workspace.fs.createDirectory(storageUri);
+            const signalUri = vscode.Uri.joinPath(
+                storageUri,
+                SYNC_FILE_PREFIX + this._syncWriter + '-' + type + '.json'
+            );
+            await vscode.workspace.fs.writeFile(signalUri, Buffer.from(JSON.stringify(signal), 'utf8'));
+        } catch (error) {
+            console.error('Could not notify other VS Code windows about note changes:', error);
+            void vscode.window.showErrorMessage('Could not update Sidebar Notepad in other VS Code windows.');
+        }
+    }
+
+    private async _cleanupSyncFiles(): Promise<void> {
+        const storageUris = [this._context.globalStorageUri, this._context.storageUri].filter(
+            (uri): uri is vscode.Uri => !!uri
+        );
+        for (const storageUri of storageUris) {
+            for (const type of ['notes', 'toolbar']) {
+                const signalUri = vscode.Uri.joinPath(
+                    storageUri,
+                    SYNC_FILE_PREFIX + this._syncWriter + '-' + type + '.json'
+                );
+                try {
+                    await vscode.workspace.fs.delete(signalUri);
+                } catch (error) {
+                    if (!(error instanceof vscode.FileSystemError) || error.code !== 'FileNotFound') {
+                        console.error('Could not clean up cross-window sync state:', error);
+                    }
+                }
+            }
+        }
+    }
+
+    private async _handleSyncSignal(uri: vscode.Uri, scope: Scope, publish = true): Promise<void> {
+        try {
+            const bytes = await vscode.workspace.fs.readFile(uri);
+            const signal = JSON.parse(Buffer.from(bytes).toString('utf8')) as Partial<WindowSyncSignal>;
+            if (signal.version !== 1 || signal.writer === this._syncWriter ||
+                signal.scope !== scope || typeof signal.writer !== 'string' ||
+                typeof signal.revision !== 'string' || typeof signal.timestamp !== 'number' ||
+                (signal.type !== 'notes' && signal.type !== 'toolbar')) {
+                return;
+            }
+            const timestampKey = scope + ':' + signal.type;
+            const sourceKey = scope + ':' + signal.type + ':' + signal.writer;
+            if (this._seenSyncRevisions.get(sourceKey) === signal.revision ||
+                signal.timestamp < (this._lastSyncTimestamps.get(timestampKey) || 0)) {
+                return;
+            }
+            this._seenSyncRevisions.set(sourceKey, signal.revision);
+            this._lastSyncTimestamps.set(timestampKey, signal.timestamp);
+
+            const toolbarTimestampKey = 'global:toolbar';
+            if (scope === 'global' && signal.type === 'toolbar' && Array.isArray(signal.toolbarPins) &&
+                signal.timestamp >= (this._lastSyncTimestamps.get(toolbarTimestampKey) || 0)) {
+                const toolbarPins = normalizeToolbarPins(signal.toolbarPins);
+                if (toolbarPins) {
+                    this._lastSyncTimestamps.set(toolbarTimestampKey, signal.timestamp);
+                    await this._context.globalState.update(TOOLBAR_PINS_KEY, toolbarPins);
+                    if (publish) {
+                        this._post({ type: 'toolbarPins', toolbarPins });
+                    }
+                }
+            }
+
+            if (signal.type !== 'notes' || !Array.isArray(signal.pages) ||
+                !Array.isArray(signal.trash)) {
+                return;
+            }
+
+            const pages = normalizeNotes(signal.pages);
+            const trash = normalizeNotes(signal.trash, true).slice(0, MAX_TRASH);
+            const store = this._storeForScope(scope);
+            await Promise.all([
+                store.update(PAGES_KEY, pages),
+                store.update(TRASH_KEY, trash)
+            ]);
+            if (this._scope === scope) {
+                this._pages = pages.length ? pages : [blankNote()];
+                this._trash = trash;
+                if (publish) {
+                    this._sendState('sync');
+                }
+            }
+        } catch (error) {
+            console.error('Could not refresh note changes from another VS Code window:', error);
+            void vscode.window.showErrorMessage('Could not refresh Sidebar Notepad from another VS Code window.');
+        }
     }
 
     public getNotes(scope: Scope = this._scope): NotePage[] {
@@ -514,7 +745,7 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
             note.title = new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
         }
         this._pages.unshift(note);
-        this._persist();
+        await this._persist();
         await this.openNote(this._scope, note.id);
     }
 
@@ -539,15 +770,19 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
         if (previous) {
             clearTimeout(previous);
         }
-        this._editorSaveTimers.set(scope, setTimeout(() => this._flushEditorWrites(scope), this._settings().autoSaveDelay));
+        this._editorSaveTimers.set(scope, setTimeout(() => {
+            void this._flushEditorWrites(scope);
+        }, this._settings().autoSaveDelay));
         this._post({ type: 'editorNoteChanged', scope, note });
     }
 
-    public flushEditorWrites() {
-        Array.from(this._pendingEditorPages.keys()).forEach(scope => this._flushEditorWrites(scope));
+    public flushEditorWrites(): Promise<void> {
+        return Promise.all(
+            Array.from(this._pendingEditorPages.keys()).map(scope => this._flushEditorWrites(scope))
+        ).then(() => undefined);
     }
 
-    private _flushEditorWrites(scope: Scope) {
+    private async _flushEditorWrites(scope: Scope): Promise<void> {
         const timer = this._editorSaveTimers.get(scope);
         if (timer) {
             clearTimeout(timer);
@@ -556,7 +791,13 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
         const pages = this._pendingEditorPages.get(scope);
         if (pages) {
             this._pendingEditorPages.delete(scope);
-            void this._storeForScope(scope).update(PAGES_KEY, pages);
+            try {
+                await this._storeForScope(scope).update(PAGES_KEY, pages);
+                await this._broadcastSync(scope, 'notes');
+            } catch (error) {
+                console.error('Could not save editor note changes:', error);
+                void vscode.window.showErrorMessage('Could not save Sidebar Notepad editor changes.');
+            }
         }
     }
 
@@ -610,7 +851,7 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
         this._post({ type: 'activityStatus', status, duration });
     }
 
-    private _sendState(type: 'init' | 'load') {
+    private _sendState(type: 'init' | 'load' | 'sync') {
         if (!this._view) {
             return;
         }
@@ -619,6 +860,7 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
             pages: this._pages,
             trash: this._trash,
             scope: this._scope,
+            toolbarPins: normalizeToolbarPins(this._context.globalState.get<unknown>(TOOLBAR_PINS_KEY)),
             hasWorkspace: this._hasWorkspace(),
             settings: this._settings(),
             imagesBase: this._view.webview.asWebviewUri(this._imagesDir()).toString()
@@ -715,8 +957,23 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
             return;
         }
         switch (msg.type) {
+            case 'saveToolbarPins': {
+                const toolbarPins = normalizeToolbarPins(msg.toolbarPins);
+                if (toolbarPins) {
+                    await this._context.globalState.update(TOOLBAR_PINS_KEY, toolbarPins);
+                    await this._broadcastSync('global', 'toolbar');
+                }
+                break;
+            }
             case 'ready': {
                 this._ready = true;
+                try {
+                    await this._refreshSyncStateFromFiles();
+                } catch (error) {
+                    console.error('Could not refresh note state from other VS Code windows:', error);
+                    void vscode.window.showErrorMessage('Could not check for Sidebar Notepad updates from other windows.');
+                }
+                this._loadState();
                 this._sendState('init');
                 void this._ai.sendLicenseStatus();
                 const queued = this._queue;
@@ -743,7 +1000,7 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
                 const pages = normalizeNotes(msg.pages);
                 this._pages = pages.length ? pages : [blankNote()];
                 this._trash = normalizeNotes(msg.trash, true).slice(0, MAX_TRASH);
-                this._persist();
+                await this._persist();
                 break;
             }
             case 'setScope':
@@ -753,10 +1010,10 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
                 if (typeof msg.text === 'string') {
                     try {
                         await vscode.env.clipboard.writeText(msg.text);
-                        this._post({ type: 'copyComplete' });
+                        this._post({ type: 'copyComplete', requestId: msg.requestId });
                     } catch (error) {
                         console.error('Could not copy note to clipboard:', error);
-                        this._post({ type: 'copyFailed' });
+                        this._post({ type: 'copyFailed', requestId: msg.requestId });
                         void vscode.window.showErrorMessage('Could not copy note to the clipboard.');
                     }
                 }
@@ -1151,7 +1408,7 @@ class NotesViewProvider implements vscode.WebviewViewProvider {
                 imageCount++;
             }
 
-            this._persist();
+            await this._persist();
             this._sendState('load');
             void vscode.window.showInformationMessage(
                 'Imported ' + imported.length + ' notes' + (imageCount ? ' and ' + imageCount + ' images' : '') + '.'
@@ -1409,7 +1666,7 @@ class NotesFileSystemProvider implements vscode.FileSystemProvider {
             throw vscode.FileSystemError.FileExists(uri);
         }
         this._notes.updateNoteFromEditor(identity.scope, identity.id, Buffer.from(content).toString('utf8'));
-        this._notes.flushEditorWrites();
+        void this._notes.flushEditorWrites();
     }
 
     public delete(uri: vscode.Uri): void {
